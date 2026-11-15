@@ -1,0 +1,432 @@
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <vector>
+#include <string>
+#include <iomanip>
+#include <algorithm>
+using namespace std;
+
+struct Expense {
+    int id;
+    string username, date, category, description;
+    double amount;
+};
+
+const string USER_FILE = "users.txt";
+const string EXPENSE_FILE = "expenses.txt";
+const string BUDGET_FILE = "budgets.txt";
+
+vector<Expense> expenses;
+
+string inputLine(const string& message) {
+    string value;
+    cout << message;
+    getline(cin, value);
+    return value;
+}
+
+double inputAmount(const string& message) {
+    double value;
+    while (true) {
+        cout << message;
+        if (cin >> value && value > 0) {
+            cin.ignore(10000, '\n');
+            return value;
+        }
+        cout << "Please enter a valid positive amount.\n";
+        cin.clear();
+        cin.ignore(10000, '\n');
+    }
+}
+
+bool validDate(const string& date) {
+    return date.size() == 10 && date[4] == '-' && date[7] == '-';
+}
+
+bool registerUser(string& username) {
+    username = inputLine("Create username: ");
+    string password = inputLine("Create password: ");
+
+    if (username.empty() || password.empty()) {
+        cout << "Username and password cannot be empty.\n";
+        return false;
+    }
+
+    ifstream in(USER_FILE);
+    string u, p;
+    while (in >> u >> p) {
+        if (u == username) {
+            cout << "Username already exists. Please login.\n";
+            return false;
+        }
+    }
+    in.close();
+
+    ofstream out(USER_FILE, ios::app);
+    out << username << " " << password << "\n";
+    cout << "Registration successful!\n";
+    return true;
+}
+
+bool loginUser(string& username) {
+    string password = inputLine("Username: ");
+    string enteredPassword = inputLine("Password: ");
+
+    ifstream in(USER_FILE);
+    string u, p;
+    while (in >> u >> p) {
+        if (u == password && p == enteredPassword) {
+            username = u;
+            cout << "Login successful. Welcome, " << username << "!\n";
+            return true;
+        }
+    }
+    cout << "Invalid username or password.\n";
+    return false;
+}
+
+void loadExpenses() {
+    expenses.clear();
+    ifstream in(EXPENSE_FILE);
+    string line;
+    while (getline(in, line)) {
+        stringstream ss(line);
+        Expense e;
+        string amountText;
+        if (getline(ss, amountText, '|') &&
+            getline(ss, e.username, '|') &&
+            getline(ss, e.date, '|') &&
+            getline(ss, e.category, '|') &&
+            getline(ss, e.description, '|')) {
+            try {
+                e.id = stoi(amountText);
+                string money;
+                if (getline(ss, money)) {
+                    e.amount = stod(money);
+                    expenses.push_back(e);
+                }
+            } catch (...) {
+                // Ignore an incorrectly formatted record.
+            }
+        }
+    }
+}
+
+void saveExpenses() {
+    ofstream out(EXPENSE_FILE);
+    for (const Expense& e : expenses) {
+        out << e.id << "|" << e.username << "|" << e.date << "|"
+            << e.category << "|" << e.description << "|" << e.amount << "\n";
+    }
+}
+
+int nextExpenseId() {
+    int id = 1;
+    for (const Expense& e : expenses)
+        id = max(id, e.id + 1);
+    return id;
+}
+
+void addExpense(const string& username) {
+    Expense e;
+    e.id = nextExpenseId();
+    e.username = username;
+
+    e.date = inputLine("Enter date (YYYY-MM-DD): ");
+    if (!validDate(e.date)) {
+        cout << "Please use the YYYY-MM-DD date format.\n";
+        return;
+    }
+
+    e.category = inputLine("Category (Food/Travel/Shopping/Bills/Other): ");
+    e.description = inputLine("Description (do not use | symbol): ");
+    if (e.category.empty() || e.description.empty() ||
+        e.category.find('|') != string::npos ||
+        e.description.find('|') != string::npos) {
+        cout << "Category/description is invalid.\n";
+        return;
+    }
+
+    e.amount = inputAmount("Enter amount: Rs. ");
+    expenses.push_back(e);
+    saveExpenses();
+    cout << "Expense added and saved successfully. ID: " << e.id << "\n";
+}
+
+void showExpenses(const string& username) {
+    cout << "\n------ EXPENSE HISTORY ------\n";
+    cout << left << setw(6) << "ID" << setw(13) << "Date"
+         << setw(15) << "Category" << setw(22) << "Description"
+         << "Amount (Rs.)\n";
+    cout << string(70, '-') << "\n";
+
+    bool found = false;
+    for (const Expense& e : expenses) {
+        if (e.username == username) {
+            found = true;
+            cout << left << setw(6) << e.id << setw(13) << e.date
+                 << setw(15) << e.category.substr(0, 14)
+                 << setw(22) << e.description.substr(0, 21)
+                 << fixed << setprecision(2) << e.amount << "\n";
+        }
+    }
+    if (!found) cout << "No expenses recorded yet.\n";
+}
+
+void categoryReport(const string& username, const string& month) {
+    vector<pair<string, double>> totals;
+    double grandTotal = 0;
+
+    for (const Expense& e : expenses) {
+        if (e.username == username && e.date.substr(0, 7) == month) {
+            grandTotal += e.amount;
+            bool found = false;
+            for (auto& item : totals) {
+                if (item.first == e.category) {
+                    item.second += e.amount;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) totals.push_back({e.category, e.amount});
+        }
+    }
+
+    cout << "\nMonthly report for " << month << "\n";
+    if (totals.empty()) {
+        cout << "No expenses found for this month.\n";
+        return;
+    }
+    for (const auto& item : totals)
+        cout << item.first << ": Rs. " << fixed << setprecision(2)
+             << item.second << "\n";
+    cout << "Total expense: Rs. " << grandTotal << "\n";
+}
+
+void setBudget(const string& username) {
+    string month = inputLine("Enter month (YYYY-MM): ");
+    if (month.size() != 7 || month[4] != '-') {
+        cout << "Use YYYY-MM format.\n";
+        return;
+    }
+    double budget = inputAmount("Enter monthly budget (Rs.): ");
+
+    vector<pair<string, double>> budgets;
+    ifstream in(BUDGET_FILE);
+    string u, m;
+    double b;
+    while (in >> u >> m >> b) {
+        if (u != username || m != month)
+            budgets.push_back({u + " " + m, b});
+    }
+    in.close();
+
+    ofstream out(BUDGET_FILE);
+    for (const auto& item : budgets)
+        out << item.first << " " << item.second << "\n";
+    out << username << " " << month << " " << budget << "\n";
+    cout << "Monthly budget saved successfully.\n";
+}
+
+double getBudget(const string& username, const string& month) {
+    ifstream in(BUDGET_FILE);
+    string u, m;
+    double b;
+    while (in >> u >> m >> b)
+        if (u == username && m == month) return b;
+    return -1;
+}
+
+int daysInMonth(const string& month) {
+    int year = 0, mon = 0;
+    try {
+        year = stoi(month.substr(0, 4));
+        mon = stoi(month.substr(5, 2));
+    } catch (...) {
+        return 30;
+    }
+    if (mon == 2)
+        return (year % 400 == 0 || (year % 4 == 0 && year % 100 != 0)) ? 29 : 28;
+    if (mon == 4 || mon == 6 || mon == 9 || mon == 11) return 30;
+    return 31;
+}
+
+void budgetWarningAndPrediction(const string& username) {
+    string month = inputLine("Enter month (YYYY-MM): ");
+    if (month.size() != 7 || month[4] != '-') {
+        cout << "Use YYYY-MM format.\n";
+        return;
+    }
+
+    double total = 0;
+    int daysRecorded = 0;
+    for (const Expense& e : expenses) {
+        if (e.username == username && e.date.substr(0, 7) == month) {
+            total += e.amount;
+            try {
+                daysRecorded = max(daysRecorded, stoi(e.date.substr(8, 2)));
+            } catch (...) {}
+        }
+    }
+
+    double budget = getBudget(username, month);
+    cout << "Total spent in " << month << ": Rs. "
+         << fixed << setprecision(2) << total << "\n";
+
+    if (budget < 0) {
+        cout << "No budget set for this month. Please set a budget first.\n";
+        return;
+    }
+
+    cout << "Monthly budget: Rs. " << budget << "\n";
+    if (total > budget)
+        cout << "WARNING: You have exceeded your budget!\n";
+    else
+        cout << "Budget remaining: Rs. " << budget - total << "\n";
+
+    if (daysRecorded > 0) {
+        double predicted = (total / daysRecorded) * daysInMonth(month);
+        cout << "Predicted month-end expense: Rs. " << predicted << "\n";
+        if (predicted > budget)
+            cout << "Prediction: Your spending may exceed the budget.\n";
+        else
+            cout << "Prediction: You may stay within your budget.\n";
+    } else {
+        cout << "Add expenses to generate a prediction.\n";
+    }
+}
+
+void searchExpense(const string& username) {
+    string key = inputLine("Enter category or description to search: ");
+    bool found = false;
+    for (const Expense& e : expenses) {
+        if (e.username == username &&
+            (e.category.find(key) != string::npos ||
+             e.description.find(key) != string::npos)) {
+            cout << "ID: " << e.id << " | " << e.date << " | "
+                 << e.category << " | " << e.description
+                 << " | Rs. " << e.amount << "\n";
+            found = true;
+        }
+    }
+    if (!found) cout << "No matching expense found.\n";
+}
+
+void sortExpenses(const string& username) {
+    vector<Expense> mine;
+    for (const Expense& e : expenses)
+        if (e.username == username) mine.push_back(e);
+
+    sort(mine.begin(), mine.end(), [](const Expense& a, const Expense& b) {
+        return a.amount < b.amount;
+    });
+
+    cout << "\nExpenses sorted by amount (low to high):\n";
+    for (const Expense& e : mine)
+        cout << e.id << " | " << e.date << " | " << e.category
+             << " | Rs. " << fixed << setprecision(2) << e.amount << "\n";
+    if (mine.empty()) cout << "No expenses to sort.\n";
+}
+
+void deleteExpense(const string& username) {
+    int id;
+    cout << "Enter expense ID to delete: ";
+    if (!(cin >> id)) {
+        cin.clear();
+        cin.ignore(10000, '\n');
+        cout << "Invalid ID.\n";
+        return;
+    }
+    cin.ignore(10000, '\n');
+
+    auto it = find_if(expenses.begin(), expenses.end(),
+        [&](const Expense& e) { return e.id == id && e.username == username; });
+
+    if (it == expenses.end()) {
+        cout << "Expense ID not found.\n";
+        return;
+    }
+    expenses.erase(it);
+    saveExpenses();
+    cout << "Expense deleted successfully.\n";
+}
+
+void mainMenu(const string& username) {
+    int choice;
+    do {
+        cout << "\n====== SMART DIGITAL EXPENSE TRACKER ======\n"
+             << "1. Add Daily Expense\n"
+             << "2. View Expense History\n"
+             << "3. Category-wise / Monthly Report\n"
+             << "4. Set Monthly Budget\n"
+             << "5. Budget Warning and Expense Prediction\n"
+             << "6. Search Expense\n"
+             << "7. Sort Expenses\n"
+             << "8. Delete Expense\n"
+             << "9. Logout and Exit\n"
+             << "Enter your choice: ";
+
+        if (!(cin >> choice)) {
+            cin.clear();
+            cin.ignore(10000, '\n');
+            cout << "Please enter a number.\n";
+            continue;
+        }
+        cin.ignore(10000, '\n');
+
+        switch (choice) {
+            case 1: addExpense(username); break;
+            case 2: showExpenses(username); break;
+            case 3: {
+                string month = inputLine("Enter month (YYYY-MM): ");
+                if (month.size() == 7 && month[4] == '-')
+                    categoryReport(username, month);
+                else
+                    cout << "Use YYYY-MM format.\n";
+                break;
+            }
+            case 4: setBudget(username); break;
+            case 5: budgetWarningAndPrediction(username); break;
+            case 6: searchExpense(username); break;
+            case 7: sortExpenses(username); break;
+            case 8: deleteExpense(username); break;
+            case 9: cout << "Logged out successfully.\n"; break;
+            default: cout << "Invalid choice. Try again.\n";
+        }
+    } while (choice != 9);
+}
+
+int main() {
+    loadExpenses();
+    string username;
+    int choice;
+
+    cout << "==========================================\n";
+    cout << " SMART DIGITAL EXPENSE TRACKER\n";
+    cout << "==========================================\n";
+    cout << "1. Register\n2. Login\n";
+    cout << "Enter choice: ";
+
+    if (!(cin >> choice)) {
+        cout << "Invalid choice.\n";
+        return 0;
+    }
+    cin.ignore(10000, '\n');
+
+    bool success = false;
+    if (choice == 1)
+        success = registerUser(username);
+    else if (choice == 2)
+        success = loginUser(username);
+    else
+        cout << "Invalid choice.\n";
+
+    if (success) {
+        loadExpenses();
+        mainMenu(username);
+    } else {
+        cout << "Please restart the program and try again.\n";
+    }
+    return 0;
+}
